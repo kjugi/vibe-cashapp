@@ -308,6 +308,17 @@ input, select, textarea {
   padding: 12px 14px;
   font-size: 0.92rem;
 }
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.update-banner .primary {
+  flex: none;
+  padding: 8px 14px;
+}
 @media (prefers-color-scheme: dark) {
   .banner { background: #3a2d18; color: #f0d7a8; }
 }
