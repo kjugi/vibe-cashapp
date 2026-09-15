@@ -8,6 +8,7 @@ import { BudgetsScreen } from './screens/Budgets'
 import { CategoriesScreen } from './screens/Categories'
 import { SchedulesScreen } from './screens/Schedules'
 import { SettingsScreen } from './screens/Settings'
+import { UpdateBanner } from './components/UpdateBanner'
 
 function Router() {
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash))
@@ -67,7 +68,12 @@ function Router() {
       break
   }
 
-  return <div className="shell">{page}</div>
+  return (
+    <div className="shell">
+      <UpdateBanner />
+      {page}
+    </div>
+  )
 }
 
 export default function App() {
