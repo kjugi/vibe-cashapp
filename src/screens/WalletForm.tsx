@@ -4,13 +4,13 @@ import { go } from '../lib/route'
 import { parseAmount } from '../lib/money'
 import { todayISO } from '../lib/period'
 
-const CURRENCIES = ['CZK', 'EUR', 'USD', 'GBP', 'PLN', 'HUF', 'CHF']
+const CURRENCIES = ['PLN', 'CZK', 'EUR', 'USD', 'GBP', 'HUF', 'CHF']
 
 export function WalletForm({ id }: { id: string }) {
   const { api, snapshot, refresh } = useDb()
   const existing = id !== 'new' ? snapshot?.wallets.find((w) => w.id === id) : undefined
   const [name, setName] = useState(existing?.name ?? '')
-  const [currency, setCurrency] = useState(existing?.currency ?? 'CZK')
+  const [currency, setCurrency] = useState(existing?.currency ?? 'PLN')
   const [opening, setOpening] = useState('')
   const [openingDate, setOpeningDate] = useState(todayISO())
   const [error, setError] = useState<string | null>(null)

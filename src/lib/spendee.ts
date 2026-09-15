@@ -56,7 +56,7 @@ export function parseSpendeeCsv(text: string): SpendeeRow[] {
     type: (cols[iType] ?? '').trim(),
     category: (cols[iCat] ?? '').trim(),
     amount: toMinor(cols[iAmt] ?? '0'),
-    currency: (cols[iCur] ?? '').trim() || 'CZK',
+    currency: (cols[iCur] ?? '').trim() || 'PLN',
     note: (iNote >= 0 ? cols[iNote] ?? '' : '').trim(),
   }))
 }
