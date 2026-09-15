@@ -298,6 +298,22 @@ input, select, textarea {
   gap: 6px;
   font-size: 0.9rem;
 }
+.legend > div,
+.legend-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.legend-item {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0;
+}
 .swatch {
   width: 10px;
   height: 10px;
