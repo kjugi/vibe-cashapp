@@ -17,6 +17,7 @@ export type DbOp =
   | { op: 'updateWallet'; idWallet: string; name: string; currency: string }
   | { op: 'archiveWallet'; idWallet: string }
   | { op: 'walletMonth'; walletId: string; start: string; end: string; today: string }
+  | { op: 'expensesByCategory'; start: string; end: string }
   | { op: 'getTransaction'; txnId: string }
   | { op: 'createTransaction'; input: NewTransaction }
   | { op: 'updateTransaction'; idTxn: string; input: NewTransaction }

@@ -63,13 +63,21 @@ export type Schedule = {
   created_at: string
 }
 
+export type PieSlice = { key: string; label: string; amount: number }
+
 export type WalletMonth = {
   wallet: Wallet
   runningBalance: number
   cashFlow: number
-  pie: { key: string; label: string; amount: number }[]
+  pie: PieSlice[]
   transactions: Transaction[]
   budgets: (Budget & { spent: number; periodStart: string; periodEnd: string })[]
+}
+
+export type ExpenseBreakdown = {
+  currency: string
+  total: number
+  slices: PieSlice[]
 }
 
 export type NewWallet = {

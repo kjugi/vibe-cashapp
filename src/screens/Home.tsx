@@ -1,11 +1,13 @@
 import { useDb } from '../state/DbContext'
 import { go } from '../lib/route'
 import { formatAmount } from '../lib/money'
-import { periodContaining, todayISO } from '../lib/period'
+import { periodContaining, periodLabel, shiftPeriod, todayISO } from '../lib/period'
 import { Pie } from '../components/Pie'
 import { WalletForm } from './WalletForm'
 import { useEffect, useMemo, useState } from 'react'
-import type { Wallet } from '../db/types'
+import type { ExpenseBreakdown, Wallet } from '../db/types'
+
+type HomeView = 'list' | 'wealth' | 'spend'
 
 type WalletBalance = { running: number; flow: number }
 
@@ -30,7 +32,9 @@ function wealthByCurrency(wallets: Wallet[], balances: Record<string, WalletBala
 export function Home({ creating }: { creating?: boolean }) {
   const { api, snapshot } = useDb()
   const [balances, setBalances] = useState<Record<string, WalletBalance>>({})
-  const [view, setView] = useState<'list' | 'wealth'>('list')
+  const [view, setView] = useState<HomeView>('list')
+  const [spendPeriod, setSpendPeriod] = useState(() => periodContaining(todayISO(), 1))
+  const [spend, setSpend] = useState<ExpenseBreakdown[] | null>(null)
 
   useEffect(() => {
     if (!snapshot) return
@@ -49,6 +53,19 @@ export function Home({ creating }: { creating?: boolean }) {
       cancelled = true
     }
   }, [api, snapshot])
+
+  useEffect(() => {
+    if (!snapshot || view !== 'spend') return
+    let cancelled = false
+    api
+      .expensesByCategory(spendPeriod.start, spendPeriod.end)
+      .then((next) => {
+        if (!cancelled) setSpend(next)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [api, snapshot, view, spendPeriod.start, spendPeriod.end])
 
   const wealth = useMemo(
     () => (snapshot ? wealthByCurrency(snapshot.wallets, balances) : []),
@@ -94,16 +111,6 @@ export function Home({ creating }: { creating?: boolean }) {
               Import SQLite backup
             </button>
           </div>
-        </div>
-      )}
-      {snapshot && snapshot.wallets.length > 0 && (
-        <div className="tabs">
-          <button type="button" className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>
-            Wallets
-          </button>
-          <button type="button" className={view === 'wealth' ? 'on' : ''} onClick={() => setView('wealth')}>
-            Wealth
-          </button>
         </div>
       )}
       {view === 'list' &&
@@ -155,10 +162,58 @@ export function Home({ creating }: { creating?: boolean }) {
             ))}
         </>
       )}
+      {view === 'spend' && snapshot && snapshot.wallets.length > 0 && (
+        <>
+          <div className="monthbar">
+            <button className="icon-btn" onClick={() => setSpendPeriod(shiftPeriod(spendPeriod, -1, 1))}>
+              ‹
+            </button>
+            <strong>{periodLabel(spendPeriod, locale)}</strong>
+            <button className="icon-btn" onClick={() => setSpendPeriod(shiftPeriod(spendPeriod, 1, 1))}>
+              ›
+            </button>
+          </div>
+          {!spend && <p className="muted">Loading…</p>}
+          {spend &&
+            spend.map((group) => (
+              <div key={group.currency} className="card">
+                <div className="hero">
+                  <div className="label">{spend.length === 1 ? 'Spent' : `Spent · ${group.currency}`}</div>
+                  <div className={`amount ${group.total > 0 ? 'neg' : ''}`}>
+                    {formatAmount(group.total, group.currency, locale)}
+                  </div>
+                </div>
+                <Pie
+                  slices={group.slices}
+                  empty="No expenses in this month."
+                  format={(amount, share) =>
+                    `${formatAmount(amount, group.currency, locale)} · ${Math.round(share * 100)}%`
+                  }
+                />
+              </div>
+            ))}
+        </>
+      )}
       {snapshot && snapshot.wallets.length > 0 && (
         <button className="primary" onClick={() => go('/wallets/new')}>
           Add wallet
         </button>
+      )}
+      {snapshot && snapshot.wallets.length > 0 && (
+        <nav className="bottom-nav" aria-label="Home sections">
+          <button type="button" className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>
+            <span aria-hidden>▣</span>
+            Wallets
+          </button>
+          <button type="button" className={view === 'wealth' ? 'on' : ''} onClick={() => setView('wealth')}>
+            <span aria-hidden>◒</span>
+            Wealth
+          </button>
+          <button type="button" className={view === 'spend' ? 'on' : ''} onClick={() => setView('spend')}>
+            <span aria-hidden>◔</span>
+            Spent
+          </button>
+        </nav>
       )}
     </div>
   )

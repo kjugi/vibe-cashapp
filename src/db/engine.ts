@@ -341,6 +341,40 @@ function walletMonth(walletId: string, start: string, end: string, today: string
   return { wallet, runningBalance: running, cashFlow, pie, transactions, budgets }
 }
 
+function expensesByCategory(start: string, end: string) {
+  const cats = new Map(listCategories().map((c) => [c.id, c.name]))
+  const groups = new Map<string, { currency: string; total: number; slices: { key: string; label: string; amount: number }[] }>()
+  for (const w of listWallets()) {
+    if (!groups.has(w.currency)) groups.set(w.currency, { currency: w.currency, total: 0, slices: [] })
+  }
+  const rows = all<{ currency: string; category_id: string | null; amount: number }>(
+    `SELECT w.currency AS currency, t.category_id AS category_id, SUM(t.amount) AS amount
+     FROM transactions t
+     JOIN wallets w ON w.id = t.wallet_id
+     WHERE t.kind = 'expense' AND w.archived = 0 AND t.date >= ? AND t.date <= ?
+     GROUP BY w.currency, t.category_id`,
+    [start, end],
+  )
+  for (const row of rows) {
+    if (row.amount <= 0) continue
+    let group = groups.get(row.currency)
+    if (!group) {
+      group = { currency: row.currency, total: 0, slices: [] }
+      groups.set(row.currency, group)
+    }
+    group.total += row.amount
+    group.slices.push({
+      key: row.category_id ?? 'unknown',
+      label: cats.get(row.category_id ?? '') ?? 'Unknown',
+      amount: row.amount,
+    })
+  }
+  for (const group of groups.values()) {
+    group.slices.sort((a, b) => b.amount - a.amount)
+  }
+  return [...groups.values()].sort((a, b) => a.currency.localeCompare(b.currency))
+}
+
 function sumEffect(walletId: string, start?: string, end?: string): number {
   let sql = `SELECT ${effectSql()} AS n FROM transactions`
   const params: Record<string, BindValue> = { $w: walletId }
@@ -663,6 +697,8 @@ async function handle(req: DbOp): Promise<unknown> {
     }
     case 'walletMonth':
       return walletMonth(req.walletId, req.start, req.end, req.today)
+    case 'expensesByCategory':
+      return expensesByCategory(req.start, req.end)
     case 'getTransaction':
       return txnById(req.txnId)
     case 'createTransaction': {

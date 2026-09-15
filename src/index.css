@@ -55,7 +55,7 @@ input, select, textarea {
   width: min(560px, 100%);
   margin: 0 auto;
   min-height: 100dvh;
-  padding: calc(20px + var(--safe-top)) 18px calc(28px + var(--safe-bottom));
+  padding: calc(20px + var(--safe-top)) 18px calc(104px + var(--safe-bottom));
 }
 
 .topbar {
@@ -333,7 +333,7 @@ input, select, textarea {
   flex: 1;
   border: 0;
   background: transparent;
-  padding: 8px;
+  padding: 8px 4px;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -341,6 +341,46 @@ input, select, textarea {
   background: var(--paper-2);
   font-weight: 600;
   box-shadow: var(--shadow);
+}
+
+.bottom-nav {
+  position: fixed;
+  z-index: 10;
+  left: 50%;
+  bottom: var(--safe-bottom);
+  transform: translateX(-50%);
+  width: min(524px, calc(100% - 24px));
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 8px 8px calc(8px + var(--safe-bottom));
+  background: color-mix(in srgb, var(--paper-2) 92%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 8px 28px rgba(36, 28, 18, 0.18);
+  backdrop-filter: blur(14px);
+}
+.bottom-nav button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 7px 4px;
+  border-radius: 14px;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.bottom-nav button span {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.bottom-nav button.on {
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 650;
 }
 
 .error {

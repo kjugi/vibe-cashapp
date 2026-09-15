@@ -9,6 +9,7 @@ import type {
   Transaction,
   Wallet,
   WalletMonth,
+  ExpenseBreakdown,
 } from './types'
 import type { SpendeeRow } from '../lib/spendee'
 import { handle } from './engine'
@@ -24,6 +25,7 @@ export type DbApi = {
   updateWallet(id: string, name: string, currency: string): Promise<void>
   archiveWallet(id: string): Promise<void>
   walletMonth(walletId: string, start: string, end: string, today: string): Promise<WalletMonth>
+  expensesByCategory(start: string, end: string): Promise<ExpenseBreakdown[]>
   getTransaction(id: string): Promise<Transaction>
   createTransaction(input: NewTransaction): Promise<void>
   updateTransaction(id: string, input: NewTransaction): Promise<void>
@@ -76,6 +78,9 @@ export function createDbClient(): DbApi {
     },
     async walletMonth(walletId, start, end, today) {
       return (await handle({ op: 'walletMonth', walletId, start, end, today })) as WalletMonth
+    },
+    async expensesByCategory(start, end) {
+      return (await handle({ op: 'expensesByCategory', start, end })) as ExpenseBreakdown[]
     },
     async getTransaction(txnId) {
       return (await handle({ op: 'getTransaction', txnId })) as Transaction
