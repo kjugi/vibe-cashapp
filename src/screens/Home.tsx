@@ -3,6 +3,7 @@ import { go } from '../lib/route'
 import { formatAmount } from '../lib/money'
 import { periodContaining, periodLabel, shiftPeriod, todayISO } from '../lib/period'
 import { Pie } from '../components/Pie'
+import { BottomNav } from '../components/BottomNav'
 import { WalletForm } from './WalletForm'
 import { useEffect, useMemo, useState } from 'react'
 import type { ExpenseBreakdown, Wallet } from '../db/types'
@@ -200,20 +201,16 @@ export function Home({ creating }: { creating?: boolean }) {
         </button>
       )}
       {snapshot && snapshot.wallets.length > 0 && (
-        <nav className="bottom-nav" aria-label="Home sections">
-          <button type="button" className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>
-            <span aria-hidden>▣</span>
-            Wallets
-          </button>
-          <button type="button" className={view === 'wealth' ? 'on' : ''} onClick={() => setView('wealth')}>
-            <span aria-hidden>◒</span>
-            Wealth
-          </button>
-          <button type="button" className={view === 'spend' ? 'on' : ''} onClick={() => setView('spend')}>
-            <span aria-hidden>◔</span>
-            Spent
-          </button>
-        </nav>
+        <BottomNav
+          label="Home sections"
+          current={view}
+          onChange={setView}
+          items={[
+            { id: 'list', icon: '▣', label: 'Wallets' },
+            { id: 'wealth', icon: '◒', label: 'Wealth' },
+            { id: 'spend', icon: '◔', label: 'Spent' },
+          ]}
+        />
       )}
     </div>
   )

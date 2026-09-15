@@ -238,6 +238,16 @@ input, select, textarea {
   padding: 12px;
 }
 .substats .label { color: var(--muted); font-size: 0.75rem; }
+.substats.compact {
+  margin: 0 0 14px;
+  gap: 8px;
+}
+.substats.compact div {
+  padding: 10px 12px;
+}
+.substats.compact .amount {
+  font-size: 1.15rem;
+}
 
 .txn {
   display: grid;
@@ -273,11 +283,21 @@ input, select, textarea {
 
 .fab {
   position: sticky;
-  bottom: calc(12px + var(--safe-bottom));
+  bottom: calc(88px + var(--safe-bottom));
   display: flex;
   justify-content: flex-end;
   pointer-events: none;
   margin-top: 18px;
+}
+.budget-row {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 .fab .primary { pointer-events: auto; }
 
