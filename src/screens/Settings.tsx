@@ -175,6 +175,8 @@ export function SettingsScreen() {
         </button>
         <h2>Settings</h2>
       </div>
+      {message && <div className="banner">{message}</div>}
+      {error && <div className="error">{error}</div>}
 
       <div className="card stack">
         <p className="muted" style={{ margin: 0 }}>
@@ -281,8 +283,6 @@ export function SettingsScreen() {
           />
         </label>
       </div>
-      {message && <div className="banner">{message}</div>}
-      {error && <div className="error">{error}</div>}
     </div>
   )
 }
