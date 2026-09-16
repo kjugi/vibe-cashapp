@@ -2,6 +2,13 @@ import { useDb } from '../state/DbContext'
 import { go } from '../lib/route'
 import { formatAmount } from '../lib/money'
 import { periodContaining, periodLabel, shiftPeriod, todayISO } from '../lib/period'
+import {
+  backupIsDue,
+  getFolderBackupStatus,
+  offerBackupFile,
+  writeBackupToFolder,
+  type FolderBackupStatus,
+} from '../lib/backup'
 import { Pie } from '../components/Pie'
 import { BottomNav } from '../components/BottomNav'
 import { WalletForm } from './WalletForm'
@@ -31,11 +38,17 @@ function wealthByCurrency(wallets: Wallet[], balances: Record<string, WalletBala
 }
 
 export function Home({ creating }: { creating?: boolean }) {
-  const { api, snapshot } = useDb()
+  const { api, snapshot, refresh } = useDb()
   const [balances, setBalances] = useState<Record<string, WalletBalance>>({})
   const [view, setView] = useState<HomeView>('list')
   const [spendPeriod, setSpendPeriod] = useState(() => periodContaining(todayISO(), 1))
   const [spend, setSpend] = useState<ExpenseBreakdown[] | null>(null)
+  const [folder, setFolder] = useState<FolderBackupStatus>({ supported: false })
+  const [backupBusy, setBackupBusy] = useState(false)
+
+  useEffect(() => {
+    void getFolderBackupStatus().then(setFolder)
+  }, [])
 
   useEffect(() => {
     if (!snapshot) return
@@ -79,7 +92,32 @@ export function Home({ creating }: { creating?: boolean }) {
   const stale =
     snapshot &&
     snapshot.wallets.length > 0 &&
-    (!snapshot.lastExportAt || Date.now() - Date.parse(snapshot.lastExportAt) > 7 * 24 * 60 * 60 * 1000)
+    (!snapshot.lastExportAt || backupIsDue(snapshot.lastExportAt, snapshot.backupInterval))
+  const folderReady = folder.supported && folder.connected && folder.permission !== 'denied'
+
+  async function backupNow() {
+    setBackupBusy(true)
+    try {
+      const bytes = await api.exportDb()
+      if (folder.supported && folder.connected) {
+        try {
+          await writeBackupToFolder(bytes, true)
+          await api.markExported()
+          await refresh()
+          setFolder(await getFolderBackupStatus())
+          return
+        } catch {
+          // Share or download instead if the folder write is blocked.
+        }
+      }
+      const result = await offerBackupFile(bytes)
+      if (result === 'cancelled') return
+      await api.markExported()
+      await refresh()
+    } finally {
+      setBackupBusy(false)
+    }
+  }
 
   return (
     <div className="stack">
@@ -93,8 +131,15 @@ export function Home({ creating }: { creating?: boolean }) {
         </button>
       </div>
       {stale && (
-        <div className="banner">
-          Export a backup from Settings. iPhone can still throw this working copy away.
+        <div className="update-banner banner" role="status">
+          <span>
+            {snapshot.lastExportAt
+              ? 'Backup is due. iPhone can still throw this working copy away.'
+              : 'Export a backup. iPhone can still throw this working copy away.'}
+          </span>
+          <button className="primary" type="button" disabled={backupBusy} onClick={() => void backupNow()}>
+            {backupBusy ? 'Saving…' : folderReady ? 'Save to folder' : 'Export'}
+          </button>
         </div>
       )}
       {snapshot?.wallets.length === 0 && (

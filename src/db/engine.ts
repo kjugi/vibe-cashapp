@@ -3,6 +3,7 @@ import sqlWasm from 'sql.js/dist/sql-wasm.wasm?url'
 import { DEFAULT_CATEGORIES, SCHEMA_SQL } from './schema'
 import type { DbOp } from './protocol'
 import type {
+  BackupInterval,
   Budget,
   Category,
   NewTransaction,
@@ -149,6 +150,7 @@ function seedIfEmpty(): void {
     ])
   }
   if (!meta('cash_flow_start_day')) setMeta('cash_flow_start_day', '1')
+  if (!meta('backup_interval')) setMeta('backup_interval', 'weekly')
   if (!meta('schema_version')) setMeta('schema_version', '1')
 }
 
@@ -273,12 +275,18 @@ function saveBudgetCategories(budgetId: string, walletId: string, categoryIds: s
   }
 }
 
+function parseBackupInterval(value: string | undefined): BackupInterval {
+  if (value === 'off' || value === 'monthly' || value === 'weekly') return value
+  return 'weekly'
+}
+
 function snapshot() {
   return {
     wallets: listWallets(),
     categories: listCategories(),
     cashFlowStartDay: Number(meta('cash_flow_start_day') ?? '1'),
     lastExportAt: meta('last_export_at') ?? null,
+    backupInterval: parseBackupInterval(meta('backup_interval')),
     persistGranted,
   }
 }
@@ -662,6 +670,11 @@ async function handle(req: DbOp): Promise<unknown> {
     case 'setCashFlowStartDay': {
       const day = Math.min(28, Math.max(1, Math.round(req.day)))
       setMeta('cash_flow_start_day', String(day))
+      await persist()
+      return snapshot()
+    }
+    case 'setBackupInterval': {
+      setMeta('backup_interval', parseBackupInterval(req.interval))
       await persist()
       return snapshot()
     }
