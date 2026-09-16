@@ -171,7 +171,7 @@ async function readError(res: Response): Promise<string> {
   return `Server HTTP ${res.status}`
 }
 
-export async function connect(token?: string): Promise<void> {
+export async function connect(token?: string, opts: { empty?: boolean } = {}): Promise<void> {
   const nextToken = (token ?? loadStored()?.token ?? envToken()).trim()
   if (!nextToken) throw new Error('Paste the CASHBOOK_TOKEN from the Vercel project.')
   setConnectError(null)
@@ -203,7 +203,7 @@ export async function connect(token?: string): Promise<void> {
     error: null,
     lastUploadAt: remote.lastBackupAt,
     lastHash: remote.lastBackupHash,
-    needsRestore: false,
+    needsRestore: Boolean(opts.empty && remote.lastBackupAt),
   })
 }
 

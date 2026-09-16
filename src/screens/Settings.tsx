@@ -173,8 +173,17 @@ export function SettingsScreen() {
 
   async function connectCloud() {
     await runCloud(async () => {
-      await connect(token || undefined)
+      const empty = (snapshot?.wallets.length ?? 0) === 0
+      await connect(token || undefined, { empty })
       setToken('')
+      if (!empty) {
+        const bytes = await api.exportDb()
+        const result = await maybeUpload(bytes, false)
+        if (result === 'uploaded') {
+          await api.markExported()
+          await refresh()
+        }
+      }
       setMessage('Connected. This phone sends the file when you open the app.')
     })
   }
