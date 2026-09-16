@@ -1,7 +1,9 @@
 import { createContext, useContext, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { createDbClient, type DbApi } from '../db/client'
 import type { DbSnapshot } from '../db/types'
+import { handleRedirect, maybeUpload, status as cloudStatus } from '../lib/dropboxBackup'
 import { todayISO } from '../lib/period'
+import { go } from '../lib/route'
 
 type DbState = {
   api: DbApi
@@ -25,15 +27,30 @@ export function DbProvider({ children }: { children: ReactNode }) {
     setSnapshot(snap)
   }, [])
 
+  const syncCloud = useCallback(async (snap: DbSnapshot) => {
+    if (cloudStatus().state !== 'connected') return
+    const bytes = await api.exportDb()
+    const result = await maybeUpload(bytes, snap.wallets.length === 0)
+    if (result === 'uploaded') {
+      await api.markExported()
+      await refresh()
+    }
+  }, [refresh])
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         await api.init()
+        const connected = await handleRedirect()
+        if (connected) go('/settings')
         await api.materialize(todayISO())
         if (cancelled) return
-        await refresh()
+        const snap = await api.snapshot()
+        if (cancelled) return
+        setSnapshot(snap)
         setReady(true)
+        await syncCloud(snap)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       }
@@ -41,17 +58,21 @@ export function DbProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [refresh])
+  }, [refresh, syncCloud])
 
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        void api.materialize(todayISO()).then(refresh)
-      }
+      if (document.visibilityState !== 'visible') return
+      void (async () => {
+        await api.materialize(todayISO())
+        const snap = await api.snapshot()
+        setSnapshot(snap)
+        await syncCloud(snap)
+      })()
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
-  }, [refresh])
+  }, [syncCloud])
 
   const value = useMemo(() => ({ api, ready, error, snapshot, refresh }), [ready, error, snapshot, refresh])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

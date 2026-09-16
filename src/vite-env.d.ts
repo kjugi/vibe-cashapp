@@ -1,6 +1,10 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
+interface ImportMetaEnv {
+  readonly VITE_DROPBOX_CLIENT_ID?: string
+}
+
 interface DirectoryPickerOptions {
   id?: string
   mode?: 'read' | 'readwrite'
@@ -19,4 +23,3 @@ declare module 'sql.js/dist/sql-wasm.js' {
   export default initSqlJs
   export type { Database }
 }
-

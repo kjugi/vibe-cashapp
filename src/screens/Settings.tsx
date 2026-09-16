@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useDb } from '../state/DbContext'
+import { useCloudBackup } from '../state/useCloudBackup'
 import { go } from '../lib/route'
 import { parseSpendeeCsv } from '../lib/spendee'
 import { applyPwaUpdate, checkForPwaUpdate, getNeedRefresh, subscribeNeedRefresh } from '../lib/pwa'
@@ -11,6 +12,15 @@ import {
   writeBackupToFolder,
   type FolderBackupStatus,
 } from '../lib/backup'
+import {
+  connect,
+  disconnect,
+  download,
+  markRestored,
+  maybeUpload,
+  redirectUri,
+  status as cloudStatus,
+} from '../lib/dropboxBackup'
 import type { BackupInterval } from '../db/types'
 
 function isAbort(err: unknown): boolean {
@@ -19,6 +29,7 @@ function isAbort(err: unknown): boolean {
 
 export function SettingsScreen() {
   const { api, snapshot, refresh } = useDb()
+  const cloud = useCloudBackup()
   const [day, setDay] = useState(snapshot?.cashFlowStartDay ?? 1)
   const [reminder, setReminder] = useState<BackupInterval>(snapshot?.backupInterval ?? 'weekly')
   const [message, setMessage] = useState<string | null>(null)
@@ -27,6 +38,7 @@ export function SettingsScreen() {
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [folderBusy, setFolderBusy] = useState(false)
   const [folder, setFolder] = useState<FolderBackupStatus>({ supported: false })
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (snapshot) {
@@ -144,6 +156,74 @@ export function SettingsScreen() {
     go('/')
   }
 
+  async function runCloud<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    setBusy(true)
+    setError(null)
+    setMessage(null)
+    try {
+      return await fn()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function connectDropbox() {
+    await runCloud(() => connect())
+  }
+
+  async function uploadDropbox(force: boolean) {
+    await runCloud(async () => {
+      const bytes = await api.exportDb()
+      const empty = (snapshot?.wallets.length ?? 0) === 0
+      const result = await maybeUpload(bytes, empty, { force })
+      if (result === 'uploaded') {
+        await api.markExported()
+        await refresh()
+        setMessage('Uploaded to Dropbox.')
+        return
+      }
+      if (result === 'needs-restore') {
+        setMessage('A Dropbox backup already exists. Restore it, or replace it with this phone.')
+        return
+      }
+      if (result === 'offline') {
+        setError('Offline — open Cashbook again when you have a network.')
+        return
+      }
+      if (result === 'failed') {
+        const now = cloudStatus()
+        const detail =
+          now.state === 'connected' || now.state === 'disconnected' ? now.error : null
+        setError(detail || 'Dropbox upload failed.')
+        return
+      }
+      setMessage('Dropbox already has this file.')
+    })
+  }
+
+  async function restoreDropbox() {
+    if (!confirm('Import from Dropbox replaces the working copy on this phone. Continue?')) return
+    await runCloud(async () => {
+      const bytes = await download()
+      await api.importSqlite(bytes)
+      await markRestored(bytes)
+      await api.markExported()
+      await refresh()
+      setMessage('Restored from Dropbox.')
+      go('/')
+    })
+  }
+
+  async function disconnectDropbox() {
+    if (!confirm('Stop uploading to Dropbox from this phone?')) return
+    await runCloud(async () => {
+      await disconnect()
+      setMessage('Disconnected from Dropbox. Manual export still works.')
+    })
+  }
+
   async function onSpendee(file: File) {
     try {
       const text = await file.text()
@@ -160,6 +240,10 @@ export function SettingsScreen() {
   const last = snapshot?.lastExportAt
     ? new Date(snapshot.lastExportAt).toLocaleString()
     : 'never'
+  const lastCloud =
+    cloud.state === 'connected' && cloud.lastUploadAt
+      ? new Date(cloud.lastUploadAt).toLocaleString()
+      : 'never'
   const folderLabel =
     folder.supported && folder.connected
       ? folder.permission === 'granted'
@@ -217,6 +301,48 @@ export function SettingsScreen() {
           <button className="primary" type="button" onClick={() => void applyPwaUpdate()}>
             Refresh to latest version
           </button>
+        )}
+      </div>
+
+      <div className="card stack">
+        <p className="muted" style={{ margin: 0 }}>
+          Sign in once. Later opens can upload this file to Dropbox with no extra tap. On iPhone, connect from the
+          Home Screen icon, not a Safari tab.
+        </p>
+        {cloud.state === 'unavailable' && (
+          <div className="muted">Cloud backup is not configured in this build.</div>
+        )}
+        {cloud.state === 'disconnected' && (
+          <>
+            {cloud.error && <div className="error">{cloud.error}</div>}
+            <div className="muted">Redirect URI: {redirectUri()}</div>
+            <button className="primary" type="button" disabled={busy} onClick={() => void connectDropbox()}>
+              Connect Dropbox
+            </button>
+          </>
+        )}
+        {cloud.state === 'connected' && (
+          <>
+            <div className="muted">Connected · last upload {lastCloud}</div>
+            {cloud.error && <div className="error">{cloud.error}</div>}
+            {cloud.needsRestore && (
+              <div className="banner">A Dropbox backup already exists. Restore it before this empty copy overwrites it.</div>
+            )}
+            <button className="primary" type="button" disabled={busy} onClick={() => void restoreDropbox()}>
+              Restore from Dropbox
+            </button>
+            <button
+              className="primary"
+              type="button"
+              disabled={busy || (cloud.needsRestore && (snapshot?.wallets.length ?? 0) === 0)}
+              onClick={() => void uploadDropbox(cloud.needsRestore && (snapshot?.wallets.length ?? 0) > 0)}
+            >
+              {cloud.needsRestore && (snapshot?.wallets.length ?? 0) > 0 ? 'Replace Dropbox file' : 'Upload now'}
+            </button>
+            <button className="ghost" type="button" disabled={busy} onClick={() => void disconnectDropbox()}>
+              Disconnect Dropbox
+            </button>
+          </>
         )}
       </div>
 
