@@ -314,6 +314,7 @@ input, select, textarea {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
+  flex-wrap: wrap;
 }
 .update-banner .primary {
   flex: none;

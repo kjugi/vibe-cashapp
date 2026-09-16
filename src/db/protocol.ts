@@ -1,4 +1,5 @@
 import type {
+  BackupInterval,
   NewBudget,
   NewSchedule,
   NewTransaction,
@@ -12,6 +13,7 @@ export type DbOp =
   | { op: 'importSqlite'; bytes: Uint8Array }
   | { op: 'snapshot' }
   | { op: 'setCashFlowStartDay'; day: number }
+  | { op: 'setBackupInterval'; interval: BackupInterval }
   | { op: 'markExported' }
   | { op: 'createWallet'; input: NewWallet }
   | { op: 'updateWallet'; idWallet: string; name: string; currency: string }

@@ -1,4 +1,5 @@
 import type {
+  BackupInterval,
   Budget,
   DbSnapshot,
   NewBudget,
@@ -20,6 +21,7 @@ export type DbApi = {
   importSqlite(bytes: Uint8Array): Promise<void>
   snapshot(): Promise<DbSnapshot>
   setCashFlowStartDay(day: number): Promise<void>
+  setBackupInterval(interval: BackupInterval): Promise<void>
   markExported(): Promise<void>
   createWallet(input: NewWallet): Promise<Wallet>
   updateWallet(id: string, name: string, currency: string): Promise<void>
@@ -63,6 +65,9 @@ export function createDbClient(): DbApi {
     },
     async setCashFlowStartDay(day) {
       await handle({ op: 'setCashFlowStartDay', day })
+    },
+    async setBackupInterval(interval) {
+      await handle({ op: 'setBackupInterval', interval })
     },
     async markExported() {
       await handle({ op: 'markExported' })

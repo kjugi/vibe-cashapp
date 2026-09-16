@@ -121,10 +121,13 @@ export type NewSchedule = {
   end_date?: string | null
 }
 
+export type BackupInterval = 'off' | 'weekly' | 'monthly'
+
 export type DbSnapshot = {
   wallets: Wallet[]
   categories: Category[]
   cashFlowStartDay: number
   lastExportAt: string | null
+  backupInterval: BackupInterval
   persistGranted: boolean
 }

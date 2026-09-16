@@ -3,20 +3,43 @@ import { useDb } from '../state/DbContext'
 import { go } from '../lib/route'
 import { parseSpendeeCsv } from '../lib/spendee'
 import { applyPwaUpdate, checkForPwaUpdate, getNeedRefresh, subscribeNeedRefresh } from '../lib/pwa'
+import {
+  chooseBackupFolder,
+  disconnectBackupFolder,
+  getFolderBackupStatus,
+  offerBackupFile,
+  writeBackupToFolder,
+  type FolderBackupStatus,
+} from '../lib/backup'
+import type { BackupInterval } from '../db/types'
+
+function isAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError'
+}
 
 export function SettingsScreen() {
   const { api, snapshot, refresh } = useDb()
   const [day, setDay] = useState(snapshot?.cashFlowStartDay ?? 1)
+  const [reminder, setReminder] = useState<BackupInterval>(snapshot?.backupInterval ?? 'weekly')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [needRefresh, setNeedRefresh] = useState(() => getNeedRefresh())
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [folderBusy, setFolderBusy] = useState(false)
+  const [folder, setFolder] = useState<FolderBackupStatus>({ supported: false })
 
   useEffect(() => {
-    if (snapshot) setDay(snapshot.cashFlowStartDay)
+    if (snapshot) {
+      setDay(snapshot.cashFlowStartDay)
+      setReminder(snapshot.backupInterval)
+    }
   }, [snapshot])
 
   useEffect(() => subscribeNeedRefresh(setNeedRefresh), [])
+
+  useEffect(() => {
+    void getFolderBackupStatus().then(setFolder)
+  }, [])
 
   async function checkUpdates() {
     setCheckingUpdate(true)
@@ -41,21 +64,75 @@ export function SettingsScreen() {
     setMessage('Cash-flow start day saved.')
   }
 
-  async function exportDb() {
-    const bytes = await api.exportDb()
-    const file = new File([bytes.buffer as ArrayBuffer], 'cashbook.sqlite', { type: 'application/octet-stream' })
-    await api.markExported()
+  async function saveReminder(next: BackupInterval) {
+    setReminder(next)
+    await api.setBackupInterval(next)
     await refresh()
-    if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title: 'Cashbook backup' })
-      return
+    setMessage(
+      next === 'off'
+        ? 'Automatic backup reminder turned off.'
+        : next === 'weekly'
+          ? 'You will be asked to backup once a week.'
+          : 'You will be asked to backup about once a month.',
+    )
+  }
+
+  async function exportDb() {
+    setError(null)
+    try {
+      const bytes = await api.exportDb()
+      const result = await offerBackupFile(bytes)
+      if (result === 'cancelled') return
+      await api.markExported()
+      await refresh()
+      setMessage(result === 'shared' ? 'Backup shared.' : 'Backup downloaded.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     }
-    const url = URL.createObjectURL(file)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'cashbook.sqlite'
-    a.click()
-    URL.revokeObjectURL(url)
+  }
+
+  async function connectFolder() {
+    setFolderBusy(true)
+    setError(null)
+    try {
+      const status = await chooseBackupFolder()
+      setFolder(status)
+      const bytes = await api.exportDb()
+      const name = await writeBackupToFolder(bytes, true)
+      await api.markExported()
+      await refresh()
+      const folderName = status.supported && status.connected ? status.name : 'the folder'
+      setMessage(`Saved ${name} to ${folderName}. Later copies write when the app opens and a backup is due.`)
+    } catch (err) {
+      if (isAbort(err)) return
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setFolderBusy(false)
+    }
+  }
+
+  async function writeFolderNow() {
+    setFolderBusy(true)
+    setError(null)
+    try {
+      const bytes = await api.exportDb()
+      const name = await writeBackupToFolder(bytes, true)
+      await api.markExported()
+      await refresh()
+      setFolder(await getFolderBackupStatus())
+      setMessage(`Saved ${name}.`)
+    } catch (err) {
+      if (isAbort(err)) return
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setFolderBusy(false)
+    }
+  }
+
+  async function disconnectFolder() {
+    await disconnectBackupFolder()
+    setFolder(await getFolderBackupStatus())
+    setMessage('Backup folder disconnected.')
   }
 
   async function onSqlite(file: File) {
@@ -83,6 +160,12 @@ export function SettingsScreen() {
   const last = snapshot?.lastExportAt
     ? new Date(snapshot.lastExportAt).toLocaleString()
     : 'never'
+  const folderLabel =
+    folder.supported && folder.connected
+      ? folder.permission === 'granted'
+        ? `Connected: ${folder.name}`
+        : `Reconnect needed: ${folder.name}`
+      : 'Not connected'
 
   return (
     <div className="stack">
@@ -136,6 +219,40 @@ export function SettingsScreen() {
       </div>
 
       <div className="card stack">
+        <p className="muted" style={{ margin: 0 }}>
+          iPhone cannot save files in the background. A reminder appears when a backup is due — share the SQLite
+          file to Files or iCloud Drive. On Chrome or Edge you can pick a folder once; dated copies are written
+          when you open the app.
+        </p>
+        <label className="field">
+          <span>Remind me to backup</span>
+          <select
+            value={reminder}
+            onChange={(e) => void saveReminder(e.target.value as BackupInterval)}
+          >
+            <option value="weekly">Once a week</option>
+            <option value="monthly">Once a month</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        {folder.supported && (
+          <>
+            <div className="muted">{folderLabel}</div>
+            <button className="primary" type="button" disabled={folderBusy} onClick={() => void connectFolder()}>
+              {folder.supported && folder.connected ? 'Change backup folder' : 'Choose backup folder'}
+            </button>
+            {folder.connected && (
+              <div className="row">
+                <button className="ghost" type="button" disabled={folderBusy} onClick={() => void writeFolderNow()}>
+                  Write backup now
+                </button>
+                <button className="ghost" type="button" disabled={folderBusy} onClick={() => void disconnectFolder()}>
+                  Disconnect folder
+                </button>
+              </div>
+            )}
+          </>
+        )}
         <button className="primary" type="button" onClick={() => void exportDb()}>
           Export SQLite backup
         </button>

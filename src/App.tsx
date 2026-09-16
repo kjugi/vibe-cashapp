@@ -9,6 +9,7 @@ import { CategoriesScreen } from './screens/Categories'
 import { SchedulesScreen } from './screens/Schedules'
 import { SettingsScreen } from './screens/Settings'
 import { UpdateBanner } from './components/UpdateBanner'
+import { AutoBackup } from './components/AutoBackup'
 
 function Router() {
   const [route, setRoute] = useState<Route>(() => parseHash(location.hash))
@@ -71,6 +72,7 @@ function Router() {
   return (
     <div className="shell">
       <UpdateBanner />
+      <AutoBackup />
       {page}
     </div>
   )
