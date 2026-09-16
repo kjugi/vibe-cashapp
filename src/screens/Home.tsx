@@ -1,4 +1,5 @@
 import { useDb } from '../state/DbContext'
+import { useCloudBackup } from '../state/useCloudBackup'
 import { go } from '../lib/route'
 import { formatAmount } from '../lib/money'
 import { periodContaining, periodLabel, shiftPeriod, todayISO } from '../lib/period'
@@ -39,6 +40,7 @@ function wealthByCurrency(wallets: Wallet[], balances: Record<string, WalletBala
 
 export function Home({ creating }: { creating?: boolean }) {
   const { api, snapshot, refresh } = useDb()
+  const cloud = useCloudBackup()
   const [balances, setBalances] = useState<Record<string, WalletBalance>>({})
   const [view, setView] = useState<HomeView>('list')
   const [spendPeriod, setSpendPeriod] = useState(() => periodContaining(todayISO(), 1))
@@ -92,8 +94,11 @@ export function Home({ creating }: { creating?: boolean }) {
   const stale =
     snapshot &&
     snapshot.wallets.length > 0 &&
+    cloud.state !== 'connected' &&
     (!snapshot.lastExportAt || backupIsDue(snapshot.lastExportAt, snapshot.backupInterval))
   const folderReady = folder.supported && folder.connected && folder.permission !== 'denied'
+  const cloudFailed = cloud.state === 'connected' && Boolean(cloud.error)
+  const needsRestore = cloud.state === 'connected' && cloud.needsRestore
 
   async function backupNow() {
     setBackupBusy(true)
@@ -130,6 +135,16 @@ export function Home({ creating }: { creating?: boolean }) {
           ⚙
         </button>
       </div>
+      {needsRestore && (
+        <button className="banner" type="button" onClick={() => go('/settings')} style={{ textAlign: 'left', width: '100%' }}>
+          A Dropbox backup already exists. Restore it from Settings before this empty copy overwrites it.
+        </button>
+      )}
+      {cloudFailed && (
+        <button className="banner" type="button" onClick={() => go('/settings')} style={{ textAlign: 'left', width: '100%' }}>
+          Dropbox backup failed — see Settings.
+        </button>
+      )}
       {stale && (
         <div className="update-banner banner" role="status">
           <span>

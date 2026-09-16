@@ -1,6 +1,6 @@
 # Cashbook
 
-Offline PWA ledger. Data lives in SQLite in the browser (OPFS). Export from Settings to keep a real backup.
+Offline PWA ledger. Data lives in SQLite in the browser (OPFS). Connect Dropbox in Settings to upload on later opens, or export a file.
 
 Weekly (or monthly) reminders appear on the home screen when a backup is due. On Chrome or Edge you can pick a folder once; a dated `.sqlite` copy is written when you open the app. iPhone Safari cannot save files in the background — share the export to Files or iCloud Drive.
 
