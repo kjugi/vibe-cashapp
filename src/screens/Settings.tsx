@@ -175,13 +175,18 @@ export function SettingsScreen() {
 
   async function uploadDropbox(force: boolean) {
     await runCloud(async () => {
+      const snap = await api.snapshot()
       const bytes = await api.exportDb()
-      const empty = (snapshot?.wallets.length ?? 0) === 0
-      const result = await maybeUpload(bytes, empty, { force })
+      const empty = snap.wallets.length === 0
+      const result = await maybeUpload(bytes, empty, { force: force || !empty })
       if (result === 'uploaded') {
         await api.markExported()
         await refresh()
         setMessage('Uploaded to Dropbox.')
+        return
+      }
+      if (result === 'empty') {
+        setMessage('Nothing to upload yet. Add a wallet first, or restore from Dropbox if a backup already exists.')
         return
       }
       if (result === 'needs-restore') {

@@ -1,3 +1,5 @@
+import { isDropboxPathNotFound } from './dropboxError'
+
 const STORAGE_KEY = 'cashbook.dropbox.v1'
 const PKCE_KEY = 'cashbook.dropbox.pkce'
 const REMOTE_PATH = '/cashbook.sqlite'
@@ -16,7 +18,7 @@ export type CloudStatus =
       needsRestore: boolean
     }
 
-export type UploadResult = 'uploaded' | 'skipped' | 'needs-restore' | 'offline' | 'failed'
+export type UploadResult = 'uploaded' | 'skipped' | 'empty' | 'needs-restore' | 'offline' | 'failed'
 
 type Stored = {
   refreshToken: string
@@ -265,7 +267,7 @@ async function remoteExists(): Promise<boolean> {
     path: REMOTE_PATH,
   })
   if (result.ok) return true
-  if (result.status === 409 && (result.tag === 'path' || /not_found/i.test(result.text))) return false
+  if (isDropboxPathNotFound(result.status, result.text)) return false
   throw new Error(result.text || `Dropbox metadata HTTP ${result.status}`)
 }
 
@@ -415,7 +417,7 @@ async function runUpload(bytes: Uint8Array, empty: boolean, force: boolean): Pro
         patchStored({ needsRestore: true, error: null })
         return 'needs-restore'
       }
-      return 'skipped'
+      return 'empty'
     }
 
     await putFile(bytes)
@@ -428,6 +430,9 @@ async function runUpload(bytes: Uint8Array, empty: boolean, force: boolean): Pro
     return 'uploaded'
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    if (empty && (isDropboxPathNotFound(409, message) || /path\/not_found/i.test(message))) {
+      return 'empty'
+    }
     if (message.includes('sign-in again') || message.includes('invalid_grant')) {
       saveStored(null)
       setConnectError(message)
