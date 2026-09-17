@@ -176,15 +176,7 @@ export function SettingsScreen() {
       const empty = (snapshot?.wallets.length ?? 0) === 0
       await connect(token || undefined, { empty })
       setToken('')
-      if (!empty) {
-        const bytes = await api.exportDb()
-        const result = await maybeUpload(bytes, false)
-        if (result === 'uploaded') {
-          await api.markExported()
-          await refresh()
-        }
-      }
-      setMessage('Connected. This phone sends the file when you open the app.')
+      setMessage('Connected. Use Upload now in Settings when you want to send a copy.')
     })
   }
 
@@ -342,8 +334,8 @@ export function SettingsScreen() {
 
       <div className="card stack">
         <p className="muted" style={{ margin: 0 }}>
-          A small Vercel server stores the upload and sends a weekly “time to backup” push if that copy is older
-          than 5 days. The phone still has to open this app to send the file.
+          A small Vercel server stores one upload and sends a weekly “time to backup” push if that copy is older
+          than 5 days. Nothing is sent until you tap Upload now.
         </p>
         {cloud.state === 'disconnected' && (
           <>

@@ -3,8 +3,8 @@ import type { PushSubscriptionJSON } from './store'
 
 const DEFAULT_PAYLOAD = {
   title: 'Cashbook',
-  body: 'Time to backup — last cloud copy is more than 5 days old. Open the app to send the file.',
-  url: '/',
+  body: 'Time to backup — last cloud copy is more than 5 days old. Open Settings and tap Upload now.',
+  url: '#/settings',
 }
 
 function vapidConfigured(): boolean {

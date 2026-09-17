@@ -6,7 +6,7 @@ Weekly (or monthly) reminders appear on the home screen when a backup is due. On
 
 ## Vercel server (cloud copy + weekly push)
 
-The static PWA and a small `/api` server deploy together on Vercel. Opening the app can upload the SQLite file. A daily cron sends a **weekly** web-push (“time to backup”) when that cloud copy is **older than 5 days**. The phone still has to open the app to send the file — push cannot read OPFS in the background.
+The static PWA and a small `/api` server deploy together on Vercel. Settings → **Upload now** sends the SQLite file. A daily cron sends a **weekly** web-push (“time to backup”) when that cloud copy is **older than 5 days**. Opening the app does not upload.
 
 1. Create a Vercel project from this repo (Vite) and a **private** Blob store, then connect the store to the project.
 2. Generate VAPID keys: `npx web-push generate-vapid-keys`.
