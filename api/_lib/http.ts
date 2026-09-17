@@ -64,13 +64,6 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-export function requireAppToken(request: Request): Response | null {
-  const expected = process.env.CASHBOOK_TOKEN?.trim()
-  if (!expected) return json(request, { error: 'CASHBOOK_TOKEN is not set on the server.' }, 503)
-  if (!safeEqual(bearerToken(request), expected)) return json(request, { error: 'Unauthorized' }, 401)
-  return null
-}
-
 export function requireCron(request: Request): Response | null {
   const secret = process.env.CRON_SECRET?.trim()
   if (secret) {

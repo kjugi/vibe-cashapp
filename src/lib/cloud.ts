@@ -1,11 +1,15 @@
-const STORAGE_KEY = 'cashbook.cloud.v1'
+const STORAGE_KEY = 'cashbook.cloud.v2'
+const OAUTH_STATE_KEY = 'cashbook.google.state'
 
 export type UploadResult = 'uploaded' | 'skipped' | 'empty' | 'needs-restore' | 'offline' | 'failed'
 
 export type CloudStatus =
+  | { state: 'unavailable' }
   | { state: 'disconnected'; error: string | null }
   | {
       state: 'connected'
+      email: string | null
+      displayName: string | null
       lastUploadAt: string | null
       lastHash: string | null
       error: string | null
@@ -15,7 +19,8 @@ export type CloudStatus =
 
 type Stored = {
   token: string
-  disabled?: boolean
+  email: string | null
+  displayName: string | null
   lastUploadAt: string | null
   lastHash: string | null
   error: string | null
@@ -24,6 +29,8 @@ type Stored = {
 }
 
 type RemoteStatus = {
+  email?: string | null
+  name?: string | null
   lastBackupAt: string | null
   lastBackupHash: string | null
   lastBackupName: string | null
@@ -36,10 +43,6 @@ const listeners = new Set<() => void>()
 let cachedStatus: CloudStatus | null = null
 let uploadLock: Promise<UploadResult> | null = null
 
-function envToken(): string {
-  return import.meta.env.VITE_CASHBOOK_TOKEN?.trim() ?? ''
-}
-
 function apiBase(): string {
   return (import.meta.env.VITE_API_URL?.trim() ?? '').replace(/\/+$/, '')
 }
@@ -48,30 +51,35 @@ export function cloudApiUrl(path: string): string {
   return `${apiBase()}${path}`
 }
 
-export function hasEnvToken(): boolean {
-  return Boolean(envToken())
+export function googleClientId(): string {
+  return import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? ''
+}
+
+export function googleConfigured(): boolean {
+  return Boolean(googleClientId())
+}
+
+export function redirectUri(): string {
+  const base = import.meta.env.BASE_URL || '/'
+  const path = base.endsWith('/') ? base : `${base}/`
+  return `${location.origin}${path}`
+}
+
+function randomState(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 function loadStored(): Stored | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Stored
-      if (parsed.disabled) return null
-      if (parsed.token) return parsed
-    }
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Stored
+    if (!parsed.token) return null
+    return parsed
   } catch {
-    /* ignore */
-  }
-  const token = envToken()
-  if (!token) return null
-  return {
-    token,
-    lastUploadAt: null,
-    lastHash: null,
-    error: connectError(),
-    needsRestore: false,
-    pushEnabled: false,
+    return null
   }
 }
 
@@ -118,11 +126,36 @@ function setConnectError(message: string | null): void {
   emit()
 }
 
+function saveOauthState(state: string | null): void {
+  try {
+    if (!state) {
+      sessionStorage.removeItem(OAUTH_STATE_KEY)
+      localStorage.removeItem(OAUTH_STATE_KEY)
+      return
+    }
+    sessionStorage.setItem(OAUTH_STATE_KEY, state)
+    localStorage.setItem(OAUTH_STATE_KEY, state)
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadOauthState(): string | null {
+  try {
+    return sessionStorage.getItem(OAUTH_STATE_KEY) ?? localStorage.getItem(OAUTH_STATE_KEY)
+  } catch {
+    return null
+  }
+}
+
 function readStatus(): CloudStatus {
+  if (!googleConfigured()) return { state: 'unavailable' }
   const stored = loadStored()
   if (!stored) return { state: 'disconnected', error: connectError() }
   return {
     state: 'connected',
+    email: stored.email,
+    displayName: stored.displayName,
     lastUploadAt: stored.lastUploadAt,
     lastHash: stored.lastHash,
     error: stored.error,
@@ -171,62 +204,114 @@ async function readError(res: Response): Promise<string> {
   return `Server HTTP ${res.status}`
 }
 
-export async function connect(token?: string, opts: { empty?: boolean } = {}): Promise<void> {
-  const nextToken = (token ?? loadStored()?.token ?? envToken()).trim()
-  if (!nextToken) throw new Error('Paste the CASHBOOK_TOKEN from the Vercel project.')
+function stripOAuthParams(): void {
+  const url = new URL(location.href)
+  url.searchParams.delete('code')
+  url.searchParams.delete('state')
+  url.searchParams.delete('scope')
+  url.searchParams.delete('authuser')
+  url.searchParams.delete('prompt')
+  url.searchParams.delete('hd')
+  url.searchParams.delete('error')
+  url.searchParams.delete('error_description')
+  history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+}
+
+export function startGoogleSignIn(): void {
+  const clientId = googleClientId()
+  if (!clientId) throw new Error('Google sign-in is not configured in this build.')
   setConnectError(null)
-  saveStored({
-    token: nextToken,
-    lastUploadAt: loadStored()?.lastUploadAt ?? null,
-    lastHash: loadStored()?.lastHash ?? null,
-    error: null,
-    needsRestore: false,
-    pushEnabled: loadStored()?.pushEnabled ?? false,
+  const state = randomState()
+  saveOauthState(state)
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri(),
+    response_type: 'code',
+    scope: 'openid email profile',
+    state,
+    prompt: 'select_account',
+    access_type: 'online',
   })
-  const res = await apiFetch('/api/backup')
-  if (!res.ok) {
-    const message = await readError(res)
+  location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+}
+
+export async function handleGoogleRedirect(opts: { empty?: boolean } = {}): Promise<boolean> {
+  const params = new URLSearchParams(location.search)
+  const code = params.get('code')
+  const state = params.get('state')
+  const oauthError = params.get('error')
+  if (!code && !oauthError) return false
+
+  const pending = loadOauthState()
+  saveOauthState(null)
+  stripOAuthParams()
+
+  if (oauthError) {
+    const message = params.get('error_description') || oauthError
+    setConnectError(message)
+    return false
+  }
+
+  if (!code) return false
+
+  if (!pending || pending !== state) {
+    setConnectError(
+      'Google sign-in did not return to this app. On iPhone, connect from the Home Screen icon, not a Safari tab.',
+    )
+    return false
+  }
+
+  try {
+    const res = await fetch(cloudApiUrl('/api/session'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, redirectUri: redirectUri() }),
+    })
+    if (!res.ok) throw new Error(await readError(res))
+    const payload = (await res.json()) as {
+      token?: string
+      email?: string | null
+      name?: string | null
+      lastBackupAt?: string | null
+    }
+    if (!payload.token) throw new Error('Server did not return a session.')
+    setConnectError(null)
     saveStored({
-      token: '',
-      disabled: true,
-      lastUploadAt: null,
+      token: payload.token,
+      email: payload.email ?? null,
+      displayName: payload.name ?? null,
+      lastUploadAt: payload.lastBackupAt ?? null,
       lastHash: null,
       error: null,
-      needsRestore: false,
-      pushEnabled: false,
+      needsRestore: Boolean(opts.empty && payload.lastBackupAt),
+      pushEnabled: loadStored()?.pushEnabled ?? false,
     })
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     setConnectError(message)
-    throw new Error(message)
+    saveStored(null)
+    return false
   }
-  const remote = (await res.json()) as RemoteStatus
-  patchStored({
-    error: null,
-    lastUploadAt: remote.lastBackupAt,
-    lastHash: remote.lastBackupHash,
-    needsRestore: Boolean(opts.empty && remote.lastBackupAt),
-  })
 }
 
 export async function disconnect(): Promise<void> {
   setConnectError(null)
-  saveStored({
-    token: '',
-    disabled: true,
-    lastUploadAt: null,
-    lastHash: null,
-    error: null,
-    needsRestore: false,
-    pushEnabled: false,
-  })
+  saveStored(null)
 }
 
 export function authHeaders(jsonBody = false): Headers {
   const stored = loadStored()
-  if (!stored?.token) throw new Error('Connect cloud backup first.')
+  if (!stored?.token) throw new Error('Sign in with Google first.')
   const headers = new Headers()
   if (jsonBody) headers.set('Content-Type', 'application/json')
   headers.set('Authorization', `Bearer ${stored.token}`)
   return headers
+}
+
+function signOutOnAuthFailure(): void {
+  saveStored(null)
+  setConnectError('Session expired. Sign in with Google again.')
 }
 
 export async function maybeUpload(
@@ -270,16 +355,7 @@ async function runUpload(bytes: Uint8Array, empty: boolean, force: boolean): Pro
       body: empty ? undefined : new Blob([bytes as BlobPart]),
     })
     if (res.status === 401) {
-      saveStored({
-        token: '',
-        disabled: true,
-        lastUploadAt: null,
-        lastHash: null,
-        error: null,
-        needsRestore: false,
-        pushEnabled: false,
-      })
-      setConnectError('Token was rejected. Connect again.')
+      signOutOnAuthFailure()
       return 'failed'
     }
     if (!res.ok) {
@@ -297,7 +373,12 @@ async function runUpload(bytes: Uint8Array, empty: boolean, force: boolean): Pro
     }
     if (payload.result === 'empty') return 'empty'
     if (payload.result === 'skipped') {
-      patchStored({ error: null, lastHash: hash, lastUploadAt: payload.lastBackupAt ?? stored.lastUploadAt, needsRestore: false })
+      patchStored({
+        error: null,
+        lastHash: hash,
+        lastUploadAt: payload.lastBackupAt ?? stored.lastUploadAt,
+        needsRestore: false,
+      })
       return 'skipped'
     }
     patchStored({
@@ -316,6 +397,10 @@ async function runUpload(bytes: Uint8Array, empty: boolean, force: boolean): Pro
 
 export async function download(): Promise<Uint8Array> {
   const res = await apiFetch('/api/backup?download=1')
+  if (res.status === 401) {
+    signOutOnAuthFailure()
+    throw new Error('Session expired. Sign in with Google again.')
+  }
   if (!res.ok) throw new Error(await readError(res))
   return new Uint8Array(await res.arrayBuffer())
 }
@@ -333,3 +418,5 @@ export async function markRestored(bytes: Uint8Array): Promise<void> {
 export function setPushEnabled(enabled: boolean): void {
   patchStored({ pushEnabled: enabled })
 }
+
+export type { RemoteStatus }

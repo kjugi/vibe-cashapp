@@ -5,6 +5,9 @@ export type PushSubscriptionJSON = {
 }
 
 export type CloudState = {
+  googleSub: string
+  email: string | null
+  displayName: string | null
   lastBackupAt: string | null
   lastBackupBytes: number | null
   lastBackupHash: string | null
@@ -13,24 +16,25 @@ export type CloudState = {
   subscriptions: PushSubscriptionJSON[]
 }
 
-const STATE_PATH = 'cashbook/state.json'
-const LATEST_PATH = 'cashbook/latest.sqlite'
-const BACKUP_PREFIX = 'cashbook/backups/'
+export type GoogleProfile = {
+  sub: string
+  email: string | null
+  name: string
+}
 
-type Memory = {
+type UserSlot = {
   state: CloudState
   latest: Uint8Array | null
   backups: Map<string, Uint8Array>
 }
 
-const memory: Memory = {
-  state: emptyState(),
-  latest: null,
-  backups: new Map(),
-}
+const memory = new Map<string, UserSlot>()
 
-export function emptyState(): CloudState {
+export function emptyState(profile: GoogleProfile): CloudState {
   return {
+    googleSub: profile.sub,
+    email: profile.email,
+    displayName: profile.name,
     lastBackupAt: null,
     lastBackupBytes: null,
     lastBackupHash: null,
@@ -42,6 +46,25 @@ export function emptyState(): CloudState {
 
 function blobConfigured(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID)
+}
+
+function paths(userId: string) {
+  const root = `cashbook/users/${userId}`
+  return {
+    state: `${root}/state.json`,
+    latest: `${root}/latest.sqlite`,
+    backups: `${root}/backups/`,
+  }
+}
+
+export function backupFileName(date = new Date()): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  return `cashbook-${y}-${m}-${d}-${hh}${mm}${ss}.sqlite`
 }
 
 async function blobPut(pathname: string, body: Buffer | string) {
@@ -81,59 +104,91 @@ async function blobDel(pathnames: string[]): Promise<void> {
   await del(pathnames)
 }
 
-export async function loadState(): Promise<CloudState> {
-  if (!blobConfigured()) return memory.state
-  const found = await blobGet(STATE_PATH)
-  if (!found) return emptyState()
+function parseState(bytes: Uint8Array, fallback: GoogleProfile): CloudState {
   try {
-    const parsed = JSON.parse(new TextDecoder().decode(found.bytes)) as Partial<CloudState>
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<CloudState>
     return {
-      ...emptyState(),
+      ...emptyState(fallback),
       ...parsed,
       subscriptions: Array.isArray(parsed.subscriptions) ? parsed.subscriptions : [],
     }
   } catch {
-    return emptyState()
+    return emptyState(fallback)
   }
 }
 
-export async function saveState(state: CloudState): Promise<void> {
+export async function loadState(userId: string): Promise<CloudState | null> {
+  if (!blobConfigured()) return memory.get(userId)?.state ?? null
+  const found = await blobGet(paths(userId).state)
+  if (!found) return null
+  return parseState(found.bytes, { sub: userId, email: null, name: 'Google user' })
+}
+
+export async function saveState(userId: string, state: CloudState): Promise<void> {
   if (!blobConfigured()) {
-    memory.state = state
+    const slot = memory.get(userId) ?? { state: emptyState({ sub: userId, email: null, name: 'Google user' }), latest: null, backups: new Map() }
+    slot.state = state
+    memory.set(userId, slot)
     return
   }
-  await blobPut(STATE_PATH, JSON.stringify(state))
+  await blobPut(paths(userId).state, JSON.stringify(state))
 }
 
-export async function saveBackup(bytes: Uint8Array, name: string, keep: number): Promise<void> {
+export async function ensureUser(profile: GoogleProfile): Promise<CloudState> {
+  const existing = await loadState(profile.sub)
+  if (existing) {
+    const next = {
+      ...existing,
+      email: profile.email ?? existing.email,
+      displayName: profile.name || existing.displayName,
+    }
+    if (next.email !== existing.email || next.displayName !== existing.displayName) {
+      await saveState(profile.sub, next)
+    }
+    return next
+  }
+  const state = emptyState(profile)
+  await saveState(profile.sub, state)
+  return state
+}
+
+export async function saveBackup(userId: string, bytes: Uint8Array, name: string, keep: number): Promise<void> {
+  const { latest, backups } = paths(userId)
   if (!blobConfigured()) {
-    memory.latest = bytes
-    memory.backups.set(`${BACKUP_PREFIX}${name}`, bytes)
-    const names = [...memory.backups.keys()].sort()
+    const slot = memory.get(userId) ?? {
+      state: emptyState({ sub: userId, email: null, name: 'Google user' }),
+      latest: null,
+      backups: new Map(),
+    }
+    slot.latest = bytes
+    slot.backups.set(`${backups}${name}`, bytes)
+    const names = [...slot.backups.keys()].sort()
     const extra = names.slice(0, Math.max(0, names.length - keep))
-    for (const path of extra) memory.backups.delete(path)
+    for (const path of extra) slot.backups.delete(path)
+    memory.set(userId, slot)
     return
   }
   const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  await blobPut(LATEST_PATH, buffer)
-  await blobPut(`${BACKUP_PREFIX}${name}`, buffer)
-  const names = (await blobList(BACKUP_PREFIX)).filter((p) => p !== LATEST_PATH)
+  await blobPut(latest, buffer)
+  await blobPut(`${backups}${name}`, buffer)
+  const names = (await blobList(backups)).filter((p) => p !== latest)
   const extra = names.slice(0, Math.max(0, names.length - keep))
   await blobDel(extra)
 }
 
-export async function loadLatestBackup(): Promise<Uint8Array | null> {
-  if (!blobConfigured()) return memory.latest
-  const found = await blobGet(LATEST_PATH)
+export async function loadLatestBackup(userId: string): Promise<Uint8Array | null> {
+  if (!blobConfigured()) return memory.get(userId)?.latest ?? null
+  const found = await blobGet(paths(userId).latest)
   return found?.bytes ?? null
 }
 
-export function backupFileName(date = new Date()): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  const hh = String(date.getHours()).padStart(2, '0')
-  const mm = String(date.getMinutes()).padStart(2, '0')
-  const ss = String(date.getSeconds()).padStart(2, '0')
-  return `cashbook-${y}-${m}-${d}-${hh}${mm}${ss}.sqlite`
+export async function listUserIds(): Promise<string[]> {
+  if (!blobConfigured()) return [...memory.keys()].sort()
+  const pathnames = await blobList('cashbook/users/')
+  const ids = new Set<string>()
+  for (const pathname of pathnames) {
+    const match = pathname.match(/^cashbook\/users\/([^/]+)\//)
+    if (match?.[1]) ids.add(match[1])
+  }
+  return [...ids].sort()
 }

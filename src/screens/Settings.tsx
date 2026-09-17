@@ -13,12 +13,11 @@ import {
   type FolderBackupStatus,
 } from '../lib/backup'
 import {
-  connect,
   disconnect,
   download,
-  hasEnvToken,
   markRestored,
   maybeUpload,
+  startGoogleSignIn,
   status as cloudStatus,
 } from '../lib/cloud'
 import { disableBackupPush, enableBackupPush, pushSupported } from '../lib/push'
@@ -40,7 +39,6 @@ export function SettingsScreen() {
   const [folderBusy, setFolderBusy] = useState(false)
   const [folder, setFolder] = useState<FolderBackupStatus>({ supported: false })
   const [busy, setBusy] = useState(false)
-  const [token, setToken] = useState('')
 
   useEffect(() => {
     if (snapshot) {
@@ -173,10 +171,7 @@ export function SettingsScreen() {
 
   async function connectCloud() {
     await runCloud(async () => {
-      const empty = (snapshot?.wallets.length ?? 0) === 0
-      await connect(token || undefined, { empty })
-      setToken('')
-      setMessage('Connected. Use Upload now in Settings when you want to send a copy.')
+      startGoogleSignIn()
     })
   }
 
@@ -228,7 +223,7 @@ export function SettingsScreen() {
   }
 
   async function disconnectCloud() {
-    if (!confirm('Stop uploading to the server from this phone?')) return
+    if (!confirm('Stop using Google backup on this phone?')) return
     await runCloud(async () => {
       try {
         await disableBackupPush()
@@ -236,7 +231,7 @@ export function SettingsScreen() {
         /* still disconnect */
       }
       await disconnect()
-      setMessage('Disconnected. Manual export still works.')
+      setMessage('Signed out. Manual export still works.')
     })
   }
 
@@ -272,6 +267,8 @@ export function SettingsScreen() {
     cloud.state === 'connected' && cloud.lastUploadAt
       ? new Date(cloud.lastUploadAt).toLocaleString()
       : 'never'
+  const cloudWho =
+    cloud.state === 'connected' ? cloud.email || cloud.displayName || 'Google' : null
   const folderLabel =
     folder.supported && folder.connected
       ? folder.permission === 'granted'
@@ -334,32 +331,25 @@ export function SettingsScreen() {
 
       <div className="card stack">
         <p className="muted" style={{ margin: 0 }}>
-          A small Vercel server stores one upload and sends a weekly “time to backup” push if that copy is older
-          than 5 days. Nothing is sent until you tap Upload now.
+          Sign in with Google so you and a friend can each keep a separate cloud copy. Nothing is sent until you
+          tap Upload now. A weekly push fires if your copy is older than 5 days.
         </p>
+        {cloud.state === 'unavailable' && (
+          <div className="muted">Google sign-in is not configured in this build. Set VITE_GOOGLE_CLIENT_ID.</div>
+        )}
         {cloud.state === 'disconnected' && (
           <>
             {cloud.error && <div className="error">{cloud.error}</div>}
-            {!hasEnvToken() && (
-              <label className="field">
-                <span>CASHBOOK_TOKEN</span>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="From the Vercel project env"
-                />
-              </label>
-            )}
             <button className="primary" type="button" disabled={busy} onClick={() => void connectCloud()}>
-              Connect server
+              Sign in with Google
             </button>
           </>
         )}
         {cloud.state === 'connected' && (
           <>
-            <div className="muted">Connected · last upload {lastCloud}</div>
+            <div className="muted">
+              {cloudWho} · last upload {lastCloud}
+            </div>
             {cloud.error && <div className="error">{cloud.error}</div>}
             {cloud.needsRestore && (
               <div className="banner">A cloud backup already exists. Restore it before this empty copy overwrites it.</div>
@@ -385,7 +375,7 @@ export function SettingsScreen() {
               </div>
             )}
             <button className="ghost" type="button" disabled={busy} onClick={() => void disconnectCloud()}>
-              Disconnect server
+              Sign out
             </button>
           </>
         )}
