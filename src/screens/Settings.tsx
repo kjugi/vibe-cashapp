@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useDb } from '../state/DbContext'
+import { useCloudBackup } from '../state/useCloudBackup'
 import { go } from '../lib/route'
 import { parseSpendeeCsv } from '../lib/spendee'
 import { applyPwaUpdate, checkForPwaUpdate, getNeedRefresh, subscribeNeedRefresh } from '../lib/pwa'
@@ -11,6 +12,15 @@ import {
   writeBackupToFolder,
   type FolderBackupStatus,
 } from '../lib/backup'
+import {
+  disconnect,
+  download,
+  markRestored,
+  maybeUpload,
+  startGoogleSignIn,
+  status as cloudStatus,
+} from '../lib/cloud'
+import { disableBackupPush, enableBackupPush, pushSupported } from '../lib/push'
 import type { BackupInterval } from '../db/types'
 
 function isAbort(err: unknown): boolean {
@@ -19,6 +29,7 @@ function isAbort(err: unknown): boolean {
 
 export function SettingsScreen() {
   const { api, snapshot, refresh } = useDb()
+  const cloud = useCloudBackup()
   const [day, setDay] = useState(snapshot?.cashFlowStartDay ?? 1)
   const [reminder, setReminder] = useState<BackupInterval>(snapshot?.backupInterval ?? 'weekly')
   const [message, setMessage] = useState<string | null>(null)
@@ -27,6 +38,7 @@ export function SettingsScreen() {
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [folderBusy, setFolderBusy] = useState(false)
   const [folder, setFolder] = useState<FolderBackupStatus>({ supported: false })
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (snapshot) {
@@ -144,6 +156,97 @@ export function SettingsScreen() {
     go('/')
   }
 
+  async function runCloud<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    setBusy(true)
+    setError(null)
+    setMessage(null)
+    try {
+      return await fn()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function connectCloud() {
+    await runCloud(async () => {
+      startGoogleSignIn()
+    })
+  }
+
+  async function uploadCloud(force: boolean) {
+    await runCloud(async () => {
+      const snap = await api.snapshot()
+      const bytes = await api.exportDb()
+      const empty = snap.wallets.length === 0
+      const result = await maybeUpload(bytes, empty, { force: force || !empty })
+      if (result === 'uploaded') {
+        await api.markExported()
+        await refresh()
+        setMessage('Uploaded to the server.')
+        return
+      }
+      if (result === 'empty') {
+        setMessage('Nothing to upload yet. Add a wallet first, or restore if a backup already exists.')
+        return
+      }
+      if (result === 'needs-restore') {
+        setMessage('A cloud backup already exists. Restore it, or replace it with this phone.')
+        return
+      }
+      if (result === 'offline') {
+        setError('Offline — open Cashbook again when you have a network.')
+        return
+      }
+      if (result === 'failed') {
+        const now = cloudStatus()
+        const detail = now.state === 'connected' || now.state === 'disconnected' ? now.error : null
+        setError(detail || 'Cloud upload failed.')
+        return
+      }
+      setMessage('Server already has this file.')
+    })
+  }
+
+  async function restoreCloud() {
+    if (!confirm('Import from the server replaces the working copy on this phone. Continue?')) return
+    await runCloud(async () => {
+      const bytes = await download()
+      await api.importSqlite(bytes)
+      await markRestored(bytes)
+      await api.markExported()
+      await refresh()
+      setMessage('Restored from the server.')
+      go('/')
+    })
+  }
+
+  async function disconnectCloud() {
+    if (!confirm('Stop using Google backup on this phone?')) return
+    await runCloud(async () => {
+      try {
+        await disableBackupPush()
+      } catch {
+        /* still disconnect */
+      }
+      await disconnect()
+      setMessage('Signed out. Manual export still works.')
+    })
+  }
+
+  async function togglePush(enable: boolean) {
+    await runCloud(async () => {
+      if (enable) {
+        await enableBackupPush()
+        setMessage('Weekly alerts are on. The server pings this phone if the cloud copy is older than 5 days.')
+      } else {
+        await disableBackupPush()
+        setMessage('Weekly alerts are off.')
+      }
+    })
+  }
+
   async function onSpendee(file: File) {
     try {
       const text = await file.text()
@@ -160,6 +263,12 @@ export function SettingsScreen() {
   const last = snapshot?.lastExportAt
     ? new Date(snapshot.lastExportAt).toLocaleString()
     : 'never'
+  const lastCloud =
+    cloud.state === 'connected' && cloud.lastUploadAt
+      ? new Date(cloud.lastUploadAt).toLocaleString()
+      : 'never'
+  const cloudWho =
+    cloud.state === 'connected' ? cloud.email || cloud.displayName || 'Google' : null
   const folderLabel =
     folder.supported && folder.connected
       ? folder.permission === 'granted'
@@ -222,9 +331,62 @@ export function SettingsScreen() {
 
       <div className="card stack">
         <p className="muted" style={{ margin: 0 }}>
+          Sign in with Google so you and a friend can each keep a separate cloud copy. Nothing is sent until you
+          tap Upload now. A weekly push fires if your copy is older than 5 days.
+        </p>
+        {cloud.state === 'unavailable' && (
+          <div className="muted">Google sign-in is not configured in this build. Set VITE_GOOGLE_CLIENT_ID.</div>
+        )}
+        {cloud.state === 'disconnected' && (
+          <>
+            {cloud.error && <div className="error">{cloud.error}</div>}
+            <button className="primary" type="button" disabled={busy} onClick={() => void connectCloud()}>
+              Sign in with Google
+            </button>
+          </>
+        )}
+        {cloud.state === 'connected' && (
+          <>
+            <div className="muted">
+              {cloudWho} · last upload {lastCloud}
+            </div>
+            {cloud.error && <div className="error">{cloud.error}</div>}
+            {cloud.needsRestore && (
+              <div className="banner">A cloud backup already exists. Restore it before this empty copy overwrites it.</div>
+            )}
+            <button className="primary" type="button" disabled={busy} onClick={() => void restoreCloud()}>
+              Restore from server
+            </button>
+            <button
+              className="primary"
+              type="button"
+              disabled={busy || (cloud.needsRestore && (snapshot?.wallets.length ?? 0) === 0)}
+              onClick={() => void uploadCloud(cloud.needsRestore && (snapshot?.wallets.length ?? 0) > 0)}
+            >
+              {cloud.needsRestore && (snapshot?.wallets.length ?? 0) > 0 ? 'Replace server file' : 'Upload now'}
+            </button>
+            {pushSupported() ? (
+              <button className="primary" type="button" disabled={busy} onClick={() => void togglePush(!cloud.pushEnabled)}>
+                {cloud.pushEnabled ? 'Disable weekly alerts' : 'Enable weekly alerts'}
+              </button>
+            ) : (
+              <div className="muted">
+                Weekly push needs a Home Screen install (iPhone) or a browser that supports web push.
+              </div>
+            )}
+            <button className="ghost" type="button" disabled={busy} onClick={() => void disconnectCloud()}>
+              Sign out
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="card stack">
+        <p className="muted" style={{ margin: 0 }}>
           iPhone cannot save files in the background. A reminder appears when a backup is due — share the SQLite
           file to Files or iCloud Drive. On Chrome or Edge you can pick a folder once; dated copies are written
-          when you open the app.
+          when you open the app. Connect the Vercel server above for a weekly push when the cloud copy is older
+          than 5 days.
         </p>
         <label className="field">
           <span>Remind me to backup</span>

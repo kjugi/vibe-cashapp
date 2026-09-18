@@ -1,7 +1,10 @@
 import { createContext, useContext, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { createDbClient, type DbApi } from '../db/client'
 import type { DbSnapshot } from '../db/types'
+import { handleGoogleRedirect } from '../lib/cloud'
 import { todayISO } from '../lib/period'
+import { syncBackupPush } from '../lib/push'
+import { go } from '../lib/route'
 
 type DbState = {
   api: DbApi
@@ -32,8 +35,14 @@ export function DbProvider({ children }: { children: ReactNode }) {
         await api.init()
         await api.materialize(todayISO())
         if (cancelled) return
-        await refresh()
+        const snap = await api.snapshot()
+        if (cancelled) return
+        const signedIn = await handleGoogleRedirect({ empty: snap.wallets.length === 0 })
+        if (cancelled) return
+        setSnapshot(snap)
         setReady(true)
+        if (signedIn) go('/settings')
+        await syncBackupPush()
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       }

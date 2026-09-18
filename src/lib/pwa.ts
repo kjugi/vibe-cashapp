@@ -15,6 +15,10 @@ export function getNeedRefresh() {
   return needRefresh
 }
 
+export function getPwaRegistration() {
+  return registration
+}
+
 export function subscribeNeedRefresh(listener: Listener) {
   listeners.add(listener)
   return () => {
