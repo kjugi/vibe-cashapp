@@ -1,5 +1,5 @@
 import webpush from 'web-push'
-import type { PushSubscriptionJSON } from './store'
+import type { PushSubscriptionJSON } from './store.js'
 
 const DEFAULT_PAYLOAD = {
   title: 'Cashbook',

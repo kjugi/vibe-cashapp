@@ -1,4 +1,4 @@
-import { handlePush } from './_lib/handlers'
+import { handlePush } from './_lib/handlers.js'
 
 export function OPTIONS(request: Request) {
   return handlePush(request)

@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose'
-import { bearerToken, json } from './http'
-import { ensureUser, loadState, type CloudState, type GoogleProfile } from './store'
+import { bearerToken, json } from './http.js'
+import { ensureUser, loadState, type CloudState, type GoogleProfile } from './store.js'
 
 const SESSION_DAYS = '90d'
 
