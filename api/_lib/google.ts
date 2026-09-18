@@ -1,5 +1,5 @@
 import { OAuth2Client } from 'google-auth-library'
-import type { GoogleProfile } from './store'
+import type { GoogleProfile } from './store.js'
 
 function googleClientId(): string {
   return (process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '').trim()

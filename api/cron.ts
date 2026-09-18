@@ -1,4 +1,4 @@
-import { handleCron } from './_lib/handlers'
+import { handleCron } from './_lib/handlers.js'
 
 export function OPTIONS(request: Request) {
   return handleCron(request)

@@ -45,7 +45,7 @@ function cashbookApi(): Plugin {
         }
         void (async () => {
           try {
-            const { dispatchApi } = await import('./api/_lib/handlers')
+            const { dispatchApi } = await import('./api/_lib/handlers.ts')
             const request = await nodeToFetch(req)
             const response = await dispatchApi(request)
             await writeFetch(res, response)

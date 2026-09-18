@@ -1,4 +1,4 @@
-import { handleSession } from './_lib/handlers'
+import { handleSession } from './_lib/handlers.js'
 
 export function OPTIONS(request: Request) {
   return handleSession(request)

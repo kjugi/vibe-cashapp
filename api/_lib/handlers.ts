@@ -1,8 +1,8 @@
-import { KEEP_CLOUD_BACKUPS, shouldSendBackupPush } from '../../shared/backup-policy'
-import { googleConfigured, googleUserFromCode } from './google'
-import { applyCors, json, preflight, requireCron } from './http'
-import { sendBackupPushes, vapidPublicKey } from './push'
-import { requireUser, signSession } from './session'
+import { KEEP_CLOUD_BACKUPS, shouldSendBackupPush } from '../../shared/backup-policy.js'
+import { googleConfigured, googleUserFromCode } from './google.js'
+import { applyCors, json, preflight, requireCron } from './http.js'
+import { sendBackupPushes, vapidPublicKey } from './push.js'
+import { requireUser, signSession } from './session.js'
 import {
   backupFileName,
   ensureUser,
@@ -12,7 +12,7 @@ import {
   saveBackup,
   saveState,
   type PushSubscriptionJSON,
-} from './store'
+} from './store.js'
 
 const MAX_BYTES = 4 * 1024 * 1024
 
