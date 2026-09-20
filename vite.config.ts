@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-const base = process.env.GITHUB_ACTIONS ? '/vibe-cashapp/' : '/'
+const base = '/'
 
 async function nodeToFetch(req: IncomingMessage): Promise<Request> {
   const host = req.headers.host ?? 'localhost'
