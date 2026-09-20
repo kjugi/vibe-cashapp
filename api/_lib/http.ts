@@ -1,12 +1,10 @@
-const DEFAULT_ALLOW = ['https://kjugi.github.io']
-
 function allowedOrigins(): string[] {
   const extra = (process.env.ALLOWED_ORIGINS ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
   const vercel = process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []
-  return [...new Set([...DEFAULT_ALLOW, ...extra, ...vercel])]
+  return [...new Set([...extra, ...vercel])]
 }
 
 function originAllowed(origin: string, request: Request): boolean {
