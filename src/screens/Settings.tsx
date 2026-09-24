@@ -364,7 +364,7 @@ export function SettingsScreen() {
     <>
     <div className="stack" inert={action !== null ? true : undefined}>
       <div className="topbar">
-        <button className="icon-btn" onClick={() => go('/')}>
+        <button className="icon-btn" type="button" disabled={action !== null} onClick={() => go('/')}>
           ←
         </button>
         <h2>Settings</h2>

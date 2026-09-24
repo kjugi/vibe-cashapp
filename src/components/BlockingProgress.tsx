@@ -18,7 +18,14 @@ export function BlockingProgress({ title, detail }: { title: string; detail: str
   }, [])
 
   return (
-    <dialog ref={ref} className="blocking-dialog" aria-labelledby="blocking-title" aria-describedby="blocking-detail">
+    <dialog
+      ref={ref}
+      className="blocking-dialog"
+      role="alertdialog"
+      aria-busy="true"
+      aria-labelledby="blocking-title"
+      aria-describedby="blocking-detail"
+    >
       <div className="blocking-card">
         <span className="spinner spinner-lg" aria-hidden="true" />
         <p id="blocking-title">{title}</p>
