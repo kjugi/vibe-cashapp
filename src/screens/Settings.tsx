@@ -325,9 +325,9 @@ export function SettingsScreen() {
       } catch {
         /* still disconnect */
       }
-      await disconnect()
-      setMessage('Signed out. Manual export still works.')
     })
+    await disconnect()
+    setMessage('Signed out. Manual export still works.')
   }
 
   async function togglePush(enable: boolean) {
