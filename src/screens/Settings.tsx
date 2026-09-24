@@ -228,20 +228,29 @@ export function SettingsScreen() {
   ): Promise<T | undefined> {
     if (actionRef.current) return
     actionRef.current = id
+    const started = performance.now()
     setAction(id)
     setError(null)
     setMessage(null)
+    // Let the spinner and dialog paint before a fast request finishes in the same turn.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve())
+    })
+    const finish = async (hold: boolean) => {
+      if (hold) return
+      const remaining = 450 - (performance.now() - started)
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining))
+      if (actionRef.current !== id) return
+      actionRef.current = null
+      setAction(null)
+    }
     try {
       const result = await fn()
-      if (!opts?.holdOnSuccess) {
-        actionRef.current = null
-        setAction(null)
-      }
+      await finish(opts?.holdOnSuccess === true)
       return result
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-      actionRef.current = null
-      setAction(null)
+      await finish(false)
     }
   }
 
@@ -249,6 +258,10 @@ export function SettingsScreen() {
     await runCloud(
       'sign-in',
       async () => {
+        // Paint the locked button and dialog before the browser leaves for Google.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        })
         startGoogleSignIn()
       },
       { holdOnSuccess: true },
