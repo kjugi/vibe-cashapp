@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDb } from '../state/DbContext'
 import { useCloudBackup } from '../state/useCloudBackup'
+import { BlockingProgress } from '../components/BlockingProgress'
 import { go } from '../lib/route'
 import { parseSpendeeCsv } from '../lib/spendee'
 import { applyPwaUpdate, checkForPwaUpdate, getNeedRefresh, subscribeNeedRefresh } from '../lib/pwa'
@@ -27,6 +28,69 @@ function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError'
 }
 
+type CloudAction = 'sign-in' | 'upload' | 'restore' | 'alerts' | 'sign-out'
+
+const CLOUD_PROGRESS: Record<CloudAction, { title: string; detail: string }> = {
+  'sign-in': {
+    title: 'Signing in…',
+    detail: 'Opening Google. Stay here until sign-in continues.',
+  },
+  upload: {
+    title: 'Uploading…',
+    detail: 'Sending this phone\'s copy to the server. Wait until it finishes.',
+  },
+  restore: {
+    title: 'Restoring…',
+    detail: 'Replacing the working copy on this phone. Wait until it finishes.',
+  },
+  alerts: {
+    title: 'Updating weekly alerts…',
+    detail: 'Saving the alert setting for this phone. Wait until it finishes.',
+  },
+  'sign-out': {
+    title: 'Signing out…',
+    detail: 'Disconnecting Google backup on this phone. Wait until it finishes.',
+  },
+}
+
+function ActionButton({
+  action,
+  id,
+  className = 'primary',
+  extraDisabled = false,
+  onClick,
+  idle,
+  pending,
+}: {
+  action: CloudAction | null
+  id: CloudAction
+  className?: string
+  extraDisabled?: boolean
+  onClick: () => void
+  idle: string
+  pending: string
+}) {
+  const active = action === id
+  return (
+    <button
+      className={className}
+      type="button"
+      disabled={action !== null || extraDisabled}
+      aria-busy={active}
+      onClick={onClick}
+    >
+      {active ? (
+        <span className="btn-pending">
+          <span className="spinner" aria-hidden="true" />
+          {pending}
+        </span>
+      ) : (
+        idle
+      )}
+    </button>
+  )
+}
+
 export function SettingsScreen() {
   const { api, snapshot, refresh } = useDb()
   const cloud = useCloudBackup()
@@ -38,7 +102,8 @@ export function SettingsScreen() {
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [folderBusy, setFolderBusy] = useState(false)
   const [folder, setFolder] = useState<FolderBackupStatus>({ supported: false })
-  const [busy, setBusy] = useState(false)
+  const [action, setAction] = useState<CloudAction | null>(null)
+  const actionRef = useRef<CloudAction | null>(null)
 
   useEffect(() => {
     if (snapshot) {
@@ -156,27 +221,55 @@ export function SettingsScreen() {
     go('/')
   }
 
-  async function runCloud<T>(fn: () => Promise<T>): Promise<T | undefined> {
-    setBusy(true)
+  async function runCloud<T>(
+    id: CloudAction,
+    fn: () => Promise<T>,
+    opts?: { holdOnSuccess?: boolean },
+  ): Promise<T | undefined> {
+    if (actionRef.current) return
+    actionRef.current = id
+    const started = performance.now()
+    setAction(id)
     setError(null)
     setMessage(null)
+    // Let the spinner and dialog paint before a fast request finishes in the same turn.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve())
+    })
+    const finish = async (hold: boolean) => {
+      if (hold) return
+      const remaining = 450 - (performance.now() - started)
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining))
+      if (actionRef.current !== id) return
+      actionRef.current = null
+      setAction(null)
+    }
     try {
-      return await fn()
+      const result = await fn()
+      await finish(opts?.holdOnSuccess === true)
+      return result
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
+      await finish(false)
     }
   }
 
   async function connectCloud() {
-    await runCloud(async () => {
-      startGoogleSignIn()
-    })
+    await runCloud(
+      'sign-in',
+      async () => {
+        // Paint the locked button and dialog before the browser leaves for Google.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        })
+        startGoogleSignIn()
+      },
+      { holdOnSuccess: true },
+    )
   }
 
   async function uploadCloud(force: boolean) {
-    await runCloud(async () => {
+    await runCloud('upload', async () => {
       const snap = await api.snapshot()
       const bytes = await api.exportDb()
       const empty = snap.wallets.length === 0
@@ -210,8 +303,9 @@ export function SettingsScreen() {
   }
 
   async function restoreCloud() {
+    if (actionRef.current) return
     if (!confirm('Import from the server replaces the working copy on this phone. Continue?')) return
-    await runCloud(async () => {
+    await runCloud('restore', async () => {
       const bytes = await download()
       await api.importSqlite(bytes)
       await markRestored(bytes)
@@ -223,20 +317,21 @@ export function SettingsScreen() {
   }
 
   async function disconnectCloud() {
+    if (actionRef.current) return
     if (!confirm('Stop using Google backup on this phone?')) return
-    await runCloud(async () => {
+    await runCloud('sign-out', async () => {
       try {
         await disableBackupPush()
       } catch {
         /* still disconnect */
       }
-      await disconnect()
-      setMessage('Signed out. Manual export still works.')
     })
+    await disconnect()
+    setMessage('Signed out. Manual export still works.')
   }
 
   async function togglePush(enable: boolean) {
-    await runCloud(async () => {
+    await runCloud('alerts', async () => {
       if (enable) {
         await enableBackupPush()
         setMessage('Weekly alerts are on. The server pings this phone if the cloud copy is older than 5 days.')
@@ -276,10 +371,13 @@ export function SettingsScreen() {
         : `Reconnect needed: ${folder.name}`
       : 'Not connected'
 
+  const progress = action ? CLOUD_PROGRESS[action] : null
+
   return (
-    <div className="stack">
+    <>
+    <div className="stack" inert={action !== null ? true : undefined}>
       <div className="topbar">
-        <button className="icon-btn" onClick={() => go('/')}>
+        <button className="icon-btn" type="button" disabled={action !== null} onClick={() => go('/')}>
           ←
         </button>
         <h2>Settings</h2>
@@ -340,9 +438,13 @@ export function SettingsScreen() {
         {cloud.state === 'disconnected' && (
           <>
             {cloud.error && <div className="error">{cloud.error}</div>}
-            <button className="primary" type="button" disabled={busy} onClick={() => void connectCloud()}>
-              Sign in with Google
-            </button>
+            <ActionButton
+              action={action}
+              id="sign-in"
+              onClick={() => void connectCloud()}
+              idle="Sign in with Google"
+              pending="Signing in…"
+            />
           </>
         )}
         {cloud.state === 'connected' && (
@@ -354,29 +456,42 @@ export function SettingsScreen() {
             {cloud.needsRestore && (
               <div className="banner">A cloud backup already exists. Restore it before this empty copy overwrites it.</div>
             )}
-            <button className="primary" type="button" disabled={busy} onClick={() => void restoreCloud()}>
-              Restore from server
-            </button>
-            <button
-              className="primary"
-              type="button"
-              disabled={busy || (cloud.needsRestore && (snapshot?.wallets.length ?? 0) === 0)}
+            <ActionButton
+              action={action}
+              id="restore"
+              onClick={() => void restoreCloud()}
+              idle="Restore from server"
+              pending="Restoring…"
+            />
+            <ActionButton
+              action={action}
+              id="upload"
+              extraDisabled={cloud.needsRestore && (snapshot?.wallets.length ?? 0) === 0}
               onClick={() => void uploadCloud(cloud.needsRestore && (snapshot?.wallets.length ?? 0) > 0)}
-            >
-              {cloud.needsRestore && (snapshot?.wallets.length ?? 0) > 0 ? 'Replace server file' : 'Upload now'}
-            </button>
+              idle={cloud.needsRestore && (snapshot?.wallets.length ?? 0) > 0 ? 'Replace server file' : 'Upload now'}
+              pending="Uploading…"
+            />
             {pushSupported() ? (
-              <button className="primary" type="button" disabled={busy} onClick={() => void togglePush(!cloud.pushEnabled)}>
-                {cloud.pushEnabled ? 'Disable weekly alerts' : 'Enable weekly alerts'}
-              </button>
+              <ActionButton
+                action={action}
+                id="alerts"
+                onClick={() => void togglePush(!cloud.pushEnabled)}
+                idle={cloud.pushEnabled ? 'Disable weekly alerts' : 'Enable weekly alerts'}
+                pending={cloud.pushEnabled ? 'Turning alerts off…' : 'Turning alerts on…'}
+              />
             ) : (
               <div className="muted">
                 Weekly push needs a Home Screen install (iPhone) or a browser that supports web push.
               </div>
             )}
-            <button className="ghost" type="button" disabled={busy} onClick={() => void disconnectCloud()}>
-              Sign out
-            </button>
+            <ActionButton
+              action={action}
+              id="sign-out"
+              className="ghost"
+              onClick={() => void disconnectCloud()}
+              idle="Sign out"
+              pending="Signing out…"
+            />
           </>
         )}
       </div>
@@ -446,5 +561,7 @@ export function SettingsScreen() {
         </label>
       </div>
     </div>
+    {progress && <BlockingProgress title={progress.title} detail={progress.detail} />}
+    </>
   )
 }
