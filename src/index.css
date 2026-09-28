@@ -126,15 +126,20 @@ button:disabled:not([aria-busy='true']) {
 .blocking-dialog {
   border: 0;
   padding: 0;
+  margin: auto;
   background: transparent;
-  max-width: calc(100% - 48px);
+  /* Same width as the settings column: .shell is min(560px, 100%) with 18px side padding. */
+  width: min(524px, calc(100% - 36px));
+  max-width: min(524px, calc(100% - 36px));
+  height: fit-content;
+  max-height: calc(100% - 48px);
 }
 .blocking-dialog::backdrop {
   background: color-mix(in srgb, var(--paper) 78%, transparent);
   backdrop-filter: blur(2px);
 }
 .blocking-card {
-  width: min(320px, 100%);
+  width: 100%;
   background: var(--paper-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
